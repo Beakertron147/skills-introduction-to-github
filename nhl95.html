@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NHL '95</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap"
+    rel="stylesheet"
+  />
+
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      background: #000;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      font-family: 'Press Start 2P', monospace;
+      overflow: hidden;
+    }
+
+    canvas {
+      display: block;
+      /* Keep pixels sharp — no browser smoothing */
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+    }
+
+    #controls {
+      margin-top: 10px;
+      color: #444;
+      font-size: 7px;
+      letter-spacing: 1px;
+      text-align: center;
+      line-height: 2;
+    }
+  </style>
+</head>
+<body>
+
+<canvas id="c" width="800" height="520"></canvas>
+
+<div id="controls">
+  P1: ARROWS · SPACE=shoot/charge · Q=pass · TAB=switch
+  &nbsp;|&nbsp;
+  P2: WASD · ENTER=shoot/charge · E=pass · SHIFT=switch
+</div>
+
+<script>
+'use strict';
+
+// ─── Canvas ───────────────────────────────────────────────────────────────────
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+ctx.imageSmoothingEnabled = false;
+
+const W = 800;
+const H = 520;
+
+// ─── Game state ───────────────────────────────────────────────────────────────
+// Possible values:
+//   'team_select'  – P1 and P2 are choosing teams
+//   'faceoff'      – countdown before puck drop
+//   'playing'      – live play
+//   'goal'         – goal celebration pause
+//   'period_end'   – brief pause between periods
+//   'game_end'     – final score screen
+const game = {
+  state:      'team_select',
+  period:     1,
+  periodTime: 180,       // seconds per period (3 × 3-min)
+  scores:     [0, 0],   // [home, away]
+  homeTeam:   null,     // filled in after team select (index into TEAMS)
+  awayTeam:   null,
+};
+
+// ─── Input ────────────────────────────────────────────────────────────────────
+const keys = {};
+
+document.addEventListener('keydown', e => {
+  if (!keys[e.code]) onKeyDown(e.code);
+  keys[e.code] = true;
+  // Prevent arrow keys / space scrolling the page
+  if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) {
+    e.preventDefault();
+  }
+});
+
+document.addEventListener('keyup', e => {
+  keys[e.code] = false;
+  onKeyUp(e.code);
+});
+
+// Stub handlers – each chunk will replace / extend these
+function onKeyDown(code) {}
+function onKeyUp(code)   {}
+
+// ─── Main render loop ─────────────────────────────────────────────────────────
+function render() {
+  ctx.fillStyle = '#000020';
+  ctx.fillRect(0, 0, W, H);
+
+  // Each chunk will add its own draw call here, gated on game.state
+  drawPlaceholder();
+
+  requestAnimationFrame(render);
+}
+
+// Temporary splash shown until later chunks fill in the real screens
+function drawPlaceholder() {
+  ctx.fillStyle = '#FFD700';
+  ctx.font      = '16px "Press Start 2P"';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('NHL \'95', W / 2, H / 2 - 20);
+
+  ctx.fillStyle = '#888';
+  ctx.font      = '8px "Press Start 2P"';
+  ctx.fillText('LOADING CHUNKS...', W / 2, H / 2 + 20);
+}
+
+requestAnimationFrame(render);
+</script>
+</body>
+</html>
