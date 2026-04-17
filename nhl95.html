@@ -164,18 +164,24 @@ function drawTeamSelect() {
     ctx.fillStyle = t.secondary;
     ctx.fillRect(x, y + h - 9, w, 9);
 
-    // abbreviation
-    ctx.fillStyle    = t.textColor;
-    ctx.font         = '8px "Press Start 2P"';
-    ctx.textAlign    = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(t.abbr, x + w / 2, y + h / 2 - 5);
+    const cellLogo = typeof LOGOS !== 'undefined' && LOGOS[t.abbr];
+    if (cellLogo) {
+      // fit logo inside cell above the stripe, with small padding
+      const pad = 3;
+      ctx.drawImage(cellLogo, x + pad, y + pad, w - pad * 2, h - 9 - pad * 2);
+    } else {
+      // fallback: abbreviation text
+      ctx.fillStyle    = t.textColor;
+      ctx.font         = '8px "Press Start 2P"';
+      ctx.textAlign    = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(t.abbr, x + w / 2, y + h / 2 - 5);
 
-    // city last word (tiny, over secondary stripe)
-    const lastWord = t.city.split(' ').pop();
-    ctx.font      = '5px "Press Start 2P"';
-    ctx.fillStyle = t.textColor === '#FFFFFF' ? '#FFFFFF' : t.primary;
-    ctx.fillText(lastWord, x + w / 2, y + h - 4);
+      const lastWord = t.city.split(' ').pop();
+      ctx.font      = '5px "Press Start 2P"';
+      ctx.fillStyle = t.textColor === '#FFFFFF' ? '#FFFFFF' : t.primary;
+      ctx.fillText(lastWord, x + w / 2, y + h - 4);
+    }
   }
 
   // ── cursors (drawn after cells so they appear on top)
@@ -491,57 +497,90 @@ function drawRink() {
 </script>
 
 <script>
-// ─── Centre-ice logo (home team) ─────────────────────────────────────────────
-// Drawn inside drawRink's clipping context so rink lines render on top.
-// Called by drawRink() after the ice fill.
+// ─── Logo preloading ──────────────────────────────────────────────────────────
+// Source: MLBAMGames/nhl_teams_logo_svg (GitHub raw) for 30 teams.
+// SEA + UTA fall back to NHL CDN (newer franchises not in that repo).
+
+const _LB  = 'https://raw.githubusercontent.com/MLBAMGames/nhl_teams_logo_svg/master/light/';
+const _CDN = 'https://assets.nhle.com/logos/nhl/svg/';
+
+// MLBAM internal codes differ from NHL abbrs for a few teams:
+//   WPG → wng,  TBL → tbl,  NJD → njd,  LAK → lak,  SJS → sjs  (all fine)
+const _MLBAM = {
+  BOS:'bos', BUF:'buf', DET:'det', FLA:'fla', MTL:'mtl', OTT:'ott',
+  TBL:'tbl', TOR:'tor', CAR:'car', CBJ:'cbj', NJD:'njd', NYI:'nyi',
+  NYR:'nyr', PHI:'phi', PIT:'pit', WSH:'wsh', CHI:'chi', COL:'col',
+  DAL:'dal', MIN:'min', NSH:'nsh', STL:'stl', WPG:'wng', ANA:'ana',
+  CGY:'cgy', EDM:'edm', LAK:'lak', SJS:'sjs', VAN:'van', VGK:'vgk',
+};
+
+const LOGOS = {};   // abbr → HTMLImageElement, or null on error
+
+(function preloadLogos() {
+  Object.entries(_MLBAM).forEach(([abbr, file]) => {
+    const img = new Image();
+    img.onload  = () => { LOGOS[abbr] = img; };
+    img.onerror = () => { LOGOS[abbr] = null; };
+    img.src = _LB + file + '_l.svg';
+  });
+  // Newer franchises: try official NHL CDN
+  ['SEA', 'UTA'].forEach(abbr => {
+    const img = new Image();
+    img.onload  = () => { LOGOS[abbr] = img; };
+    img.onerror = () => { LOGOS[abbr] = null; };
+    img.src = _CDN + abbr + '_light.svg';
+  });
+}());
+
+// ─── Centre-ice logo ──────────────────────────────────────────────────────────
+// Called by drawRink() inside its save/clip, so rink lines render on top.
 
 function drawCenterIceLogo() {
   if (game.homeTeam === null) return;
 
   const team = TEAMS[game.homeTeam];
-  const r    = Math.round(RINK.h * 0.188);   // just inside the red circle
+  const r    = Math.round(RINK.h * 0.188);
   const cx   = RINK.cx;
   const cy   = RINK.cy;
+  const logo = LOGOS[team.abbr];
 
-  // ── nested clip: confine logo to its circle
   ctx.save();
   ctx.beginPath();
   ctx.arc(cx, cy, r, 0, Math.PI * 2);
   ctx.clip();
 
-  // primary colour background
-  ctx.fillStyle = team.primary;
-  ctx.beginPath();
-  ctx.arc(cx, cy, r, 0, Math.PI * 2);
-  ctx.fill();
+  if (logo) {
+    ctx.drawImage(logo, cx - r, cy - r, r * 2, r * 2);
+  } else {
+    // coloured badge fallback
+    ctx.fillStyle = team.primary;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fill();
+    const sh = r * 0.21;
+    ctx.fillStyle = team.secondary;
+    ctx.fillRect(cx - r, cy - sh * 2.1, r * 2, sh);
+    ctx.fillRect(cx - r, cy + sh * 1.1, r * 2, sh);
+    ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+    ctx.lineWidth   = 3;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r - 3, 0, Math.PI * 2);
+    ctx.stroke();
+  }
 
-  // two horizontal jersey stripes in secondary colour
-  const sh = r * 0.21;
-  ctx.fillStyle = team.secondary;
-  ctx.fillRect(cx - r, cy - sh * 2.1, r * 2, sh);
-  ctx.fillRect(cx - r, cy + sh * 1.1, r * 2, sh);
+  ctx.restore();
 
-  // thin white outline ring (looks like emblem border)
-  ctx.strokeStyle = 'rgba(255,255,255,0.55)';
-  ctx.lineWidth   = 3;
-  ctx.beginPath();
-  ctx.arc(cx, cy, r - 3, 0, Math.PI * 2);
-  ctx.stroke();
-
-  ctx.restore();   // back to rink clip
-
-  // ── team abbreviation, centred over the badge
-  const fs = Math.round(r * 0.38);
-  ctx.font         = fs + 'px "Press Start 2P"';
-  ctx.textAlign    = 'center';
-  ctx.textBaseline = 'middle';
-
-  // drop-shadow for readability
-  ctx.fillStyle = 'rgba(0,0,0,0.5)';
-  ctx.fillText(team.abbr, cx + 2, cy + 3);
-
-  ctx.fillStyle = team.textColor;
-  ctx.fillText(team.abbr, cx, cy);
+  // text abbreviation only when logo not available
+  if (!logo) {
+    const fs = Math.round(r * 0.38);
+    ctx.font         = fs + 'px "Press Start 2P"';
+    ctx.textAlign    = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle    = 'rgba(0,0,0,0.5)';
+    ctx.fillText(team.abbr, cx + 2, cy + 3);
+    ctx.fillStyle    = team.textColor;
+    ctx.fillText(team.abbr, cx, cy);
+  }
 }
 </script>
 </body>
