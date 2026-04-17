@@ -362,6 +362,9 @@ function drawRink() {
     ctx.stroke();
   }
 
+  // ── centre-ice logo (home team) drawn before lines so lines sit on top
+  drawCenterIceLogo();
+
   // ── center red line (dashed)
   ctx.strokeStyle = '#CC1111';
   ctx.lineWidth = 5;
@@ -484,6 +487,61 @@ function drawRink() {
     ctx.lineTo(gx, net.y + net.h);
     ctx.stroke();
   });
+}
+</script>
+
+<script>
+// ─── Centre-ice logo (home team) ─────────────────────────────────────────────
+// Drawn inside drawRink's clipping context so rink lines render on top.
+// Called by drawRink() after the ice fill.
+
+function drawCenterIceLogo() {
+  if (game.homeTeam === null) return;
+
+  const team = TEAMS[game.homeTeam];
+  const r    = Math.round(RINK.h * 0.188);   // just inside the red circle
+  const cx   = RINK.cx;
+  const cy   = RINK.cy;
+
+  // ── nested clip: confine logo to its circle
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.clip();
+
+  // primary colour background
+  ctx.fillStyle = team.primary;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fill();
+
+  // two horizontal jersey stripes in secondary colour
+  const sh = r * 0.21;
+  ctx.fillStyle = team.secondary;
+  ctx.fillRect(cx - r, cy - sh * 2.1, r * 2, sh);
+  ctx.fillRect(cx - r, cy + sh * 1.1, r * 2, sh);
+
+  // thin white outline ring (looks like emblem border)
+  ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+  ctx.lineWidth   = 3;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r - 3, 0, Math.PI * 2);
+  ctx.stroke();
+
+  ctx.restore();   // back to rink clip
+
+  // ── team abbreviation, centred over the badge
+  const fs = Math.round(r * 0.38);
+  ctx.font         = fs + 'px "Press Start 2P"';
+  ctx.textAlign    = 'center';
+  ctx.textBaseline = 'middle';
+
+  // drop-shadow for readability
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  ctx.fillText(team.abbr, cx + 2, cy + 3);
+
+  ctx.fillStyle = team.textColor;
+  ctx.fillText(team.abbr, cx, cy);
 }
 </script>
 </body>
