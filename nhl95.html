@@ -308,8 +308,10 @@ function render(t) {
     resolveCollisions();
     updatePuck();
     updateShooting();
+    updatePassing();
     drawRink();
     drawAllPlayers();
+    drawPassIndicator();
     drawPuck();
     drawShootingEffects();
     drawScoreboard();
@@ -1262,6 +1264,110 @@ onKeyUp = function patchedKeyUp(code) {
   _prevKeyUp(code);
   if (code === 'Space') tryShoot(0);
   if (code === 'Enter') tryShoot(1);
+};
+</script>
+
+<script>
+// ─── Chunk 11: Passing + one-timer ────────────────────────────────────────────
+// Q = P1 pass   E = P2 pass
+// Hold shoot key while receiving a pass → one-timer (30 % power bonus)
+
+// Pick the best teammate to receive: prefer players ahead of the carrier
+function bestPassTarget(carrier, teamIdx) {
+  const cos = Math.cos(carrier.dir), sin = Math.sin(carrier.dir);
+  const candidates = players.filter(p => p.team === teamIdx && p !== carrier);
+  if (!candidates.length) return null;
+
+  let best = null, bestScore = Infinity;
+  candidates.forEach(t => {
+    const dx = t.x - carrier.x, dy = t.y - carrier.y;
+    const dist  = Math.hypot(dx, dy);
+    const fwd   = cos * dx + sin * dy;          // +ve = in front of carrier
+    const score = dist - (fwd > 0 ? 40 : 0);   // 40 px bonus for forward targets
+    if (score < bestScore) { bestScore = score; best = t; }
+  });
+  return best;
+}
+
+function tryPass(teamIdx) {
+  if (game.state !== 'playing') return;
+  const ctrl = players.find(p => p.team === teamIdx && p.controlled);
+  if (!ctrl || puck.carrier !== ctrl) return;
+
+  const target = bestPassTarget(ctrl, teamIdx);
+  if (!target) return;
+
+  const roster  = teamIdx === 0 ? TEAMS[game.homeTeam].roster
+                                : TEAMS[game.awayTeam].roster;
+  const pas     = (roster[ctrl.rIdx] || { pas: 80 }).pas;
+  const passSpd = 8 + pas / 98 * 6;     // 8–14 px/frame scaled by pas stat
+
+  const dx = target.x - puck.x, dy = target.y - puck.y;
+  const d  = Math.hypot(dx, dy);
+  if (d < 1) return;
+
+  puck.vx          = dx / d * passSpd;
+  puck.vy          = dy / d * passSpd;
+  puck.carrier     = null;
+  puck.immune      = ctrl;
+  puck.immuneTimer = 18;
+}
+
+// ── One-timer: fire immediately when shoot key is held at moment of pickup ────
+let _prevCarrier = null;
+
+function updatePassing() {
+  if (game.state !== 'playing') { _prevCarrier = puck.carrier; return; }
+
+  const cur = puck.carrier;
+  // Detect the frame the puck was just picked up
+  if (cur !== null && _prevCarrier === null && cur.controlled) {
+    const key = cur.team === 0 ? 'Space' : 'Enter';
+    if (keys[key]) fireOnetimer(cur);
+  }
+  _prevCarrier = cur;
+}
+
+function fireOnetimer(p) {
+  const roster = p.team === 0 ? TEAMS[game.homeTeam].roster
+                              : TEAMS[game.awayTeam].roster;
+  const sht  = (roster[p.rIdx] || { sht: 80 }).sht;
+  const spd  = (10 + sht / 98 * 8) * 1.30;   // 30 % bonus — one-timers are hard!
+
+  puck.vx          = Math.cos(p.dir) * spd;
+  puck.vy          = Math.sin(p.dir) * spd;
+  puck.carrier     = null;
+  puck.immune      = p;
+  puck.immuneTimer = 28;
+  charge[p.team]   = 0;
+}
+
+// ── Dashed ring on likely pass recipient (always visible when carrier has puck)
+function drawPassIndicator() {
+  if (game.state !== 'playing') return;
+  [0, 1].forEach(team => {
+    const ctrl = players.find(p => p.team === team && p.controlled
+                                && p === puck.carrier);
+    if (!ctrl) return;
+    const target = bestPassTarget(ctrl, team);
+    if (!target) return;
+
+    ctx.strokeStyle  = team === 0 ? 'rgba(255,215,0,0.65)' : 'rgba(0,229,255,0.65)';
+    ctx.lineWidth    = 1.5;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.arc(target.x, target.y, 16, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  });
+}
+
+// ── Patch onKeyDown for pass keys ─────────────────────────────────────────────
+const _prevKD11 = onKeyDown;
+onKeyDown = function(code) {
+  _prevKD11(code);
+  if (code === 'KeyQ') tryPass(0);
+  if (code === 'KeyE') tryPass(1);
 };
 </script>
 </body>
