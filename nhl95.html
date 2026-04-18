@@ -305,6 +305,7 @@ function render(t) {
   } else {
     tickClock(t);
     updatePlayers();
+    resolveCollisions();
     drawRink();
     drawAllPlayers();
     drawScoreboard();
@@ -923,6 +924,77 @@ function updatePlayers() {
       movePlayer(p, 'KeyW', 'KeyS', 'KeyA', 'KeyD');
     }
   });
+}
+</script>
+
+<script>
+// ─── Chunk 8: Player collisions ───────────────────────────────────────────────
+// Simple elastic-impulse collision between every pair of players.
+// Same-team contacts barely bounce; cross-team contacts use the chk stat
+// to scale the impulse so hard-checkers hit harder.
+
+const PLAYER_R = 10;                  // collision radius per player (px)
+const MIN_SEP  = PLAYER_R * 2;       // minimum centre-to-centre distance
+
+function getRoster(p) {
+  return p.team === 0 ? TEAMS[game.homeTeam].roster : TEAMS[game.awayTeam].roster;
+}
+
+function resolveCollisions() {
+  if (game.state !== 'playing') return;
+
+  for (let i = 0; i < players.length; i++) {
+    for (let j = i + 1; j < players.length; j++) {
+      const a = players[i], b = players[j];
+
+      const dx   = b.x - a.x;
+      const dy   = b.y - a.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist >= MIN_SEP || dist < 0.01) continue;
+
+      // Unit normal a → b
+      const nx = dx / dist, ny = dy / dist;
+
+      // ── Push positions apart equally
+      const half = (MIN_SEP - dist) * 0.51;
+      a.x -= nx * half;  a.y -= ny * half;
+      b.x += nx * half;  b.y += ny * half;
+
+      // ── Velocity impulse
+      const dvn = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
+      if (dvn >= 0) continue;   // already separating — skip
+
+      const sameTeam = a.team === b.team;
+
+      // Restitution: same-team just slides apart; cross-team bounces
+      const e = sameTeam ? 0.06 : 0.38;
+      let impulse = -(1 + e) * dvn / 2;
+
+      // Cross-team: add checking bonus based on chk stats & approach speed
+      if (!sameTeam) {
+        const aStats = getRoster(a)[a.rIdx] || { chk: 80 };
+        const bStats = getRoster(b)[b.rIdx] || { chk: 80 };
+        const aSpd   = Math.hypot(a.vx, a.vy);
+        const bSpd   = Math.hypot(b.vx, b.vy);
+        // Extra shove: attacker's check power minus defender's resistance
+        const bonus = Math.max(0, aSpd * aStats.chk / 98 - bSpd * bStats.chk / 98) * 0.28;
+        impulse += bonus;
+      }
+
+      a.vx -= impulse * nx;  a.vy -= impulse * ny;
+      b.vx += impulse * nx;  b.vy += impulse * ny;
+
+      // Cap post-collision speed so nobody launches off the screen
+      const capSpd = MAX_SPD * 1.7;
+      for (const p of [a, b]) {
+        const s = Math.hypot(p.vx, p.vy);
+        if (s > capSpd) { p.vx = p.vx / s * capSpd; p.vy = p.vy / s * capSpd; }
+      }
+
+      [a.x, a.y] = clampToRink(a.x, a.y);
+      [b.x, b.y] = clampToRink(b.x, b.y);
+    }
+  }
 }
 </script>
 </body>
