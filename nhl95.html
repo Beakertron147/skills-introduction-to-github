@@ -304,6 +304,7 @@ function render(t) {
     drawTeamSelect();
   } else {
     tickClock(t);
+    updateGoalieAI();
     updatePlayers();
     resolveCollisions();
     updatePuck();
@@ -1369,6 +1370,61 @@ onKeyDown = function(code) {
   if (code === 'KeyQ') tryPass(0);
   if (code === 'KeyE') tryPass(1);
 };
+</script>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     CHUNK 12 — GOALIE AI
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<script>
+function goalieTargetPos(g) {
+  const isHome = g.team === 0;
+  const netX   = isHome ? GL2 : GL1;
+  const netY   = RINK.cy;
+  const dx     = puck.x - netX;
+  const dy     = puck.y - netY;
+  const dist   = Math.sqrt(dx * dx + dy * dy) || 1;
+  const creaseReach = NET_D + 2;
+  const fraction    = Math.min(creaseReach / dist, 1);
+  return { x: netX + dx * fraction, y: netY + dy * fraction };
+}
+
+function updateGoalieAI() {
+  if (game.state !== 'playing') return;
+  players.forEach(g => {
+    if (!g.isGoalie) return;
+    const roster = g.team === 0
+      ? TEAMS[game.homeTeam].roster
+      : TEAMS[game.awayTeam].roster;
+    const save = (roster[g.rIdx] || { save: 85 }).save;
+
+    let spd = 1.6 + (save - 80) / 13 * 0.8;   // 1.6–2.4 px/frame
+
+    // Dive faster when shot is incoming
+    const isHome  = g.team === 0;
+    const puckSpd = Math.sqrt(puck.vx * puck.vx + puck.vy * puck.vy);
+    const movingIn = isHome ? puck.vx > 0 : puck.vx < 0;
+    if (puckSpd > 3.5 && movingIn && puck.carrier === null) spd *= 2.5;
+
+    const target = goalieTargetPos(g);
+    const ex = target.x - g.x;
+    const ey = target.y - g.y;
+    const ed = Math.sqrt(ex * ex + ey * ey) || 1;
+    if (ed > 1) {
+      const move = Math.min(spd, ed);
+      g.x += (ex / ed) * move;
+      g.y += (ey / ed) * move;
+    }
+
+    g.dir = Math.atan2(puck.y - g.y, puck.x - g.x);
+
+    clampGoalie(g);
+    const cl = clampToRink(g.x, g.y);
+    g.x = cl.x;
+    g.y = cl.y;
+    g.vx = 0;
+    g.vy = 0;
+  });
+}
 </script>
 </body>
 </html>
