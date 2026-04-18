@@ -304,6 +304,7 @@ function render(t) {
     drawTeamSelect();
   } else {
     tickClock(t);
+    updatePlayers();
     drawRink();
     drawAllPlayers();
     drawScoreboard();
@@ -829,6 +830,98 @@ function drawAllPlayers() {
   players.forEach(p => {
     const team = p.team === 0 ? TEAMS[game.homeTeam] : TEAMS[game.awayTeam];
     drawSprite(p.x, p.y, p.dir, p.isGoalie, p.controlled, team);
+  });
+}
+</script>
+
+<script>
+// ─── Chunk 7: Player movement ─────────────────────────────────────────────────
+// Ice physics: acceleration, friction, speed cap scaled by player spd stat.
+// P1 → Arrow keys   P2 → WASD
+// Rink boundary uses elliptical approximation of the rounded-corner oval.
+
+const ACCEL    = 0.52;   // px / frame²  (per axis)
+const FRICTION = 0.83;   // velocity multiplier per frame
+const MAX_SPD  = 4.4;    // px / frame for a spd-98 player
+
+function statMax(rIdx, team) {
+  const roster = team === 0 ? TEAMS[game.homeTeam].roster : TEAMS[game.awayTeam].roster;
+  const r = roster[rIdx];
+  return r ? MAX_SPD * r.spd / 98 : MAX_SPD * 0.82;
+}
+
+// Elliptical rink boundary (good enough for a SNES-style game)
+function clampToRink(x, y) {
+  const bd = 13;                         // player radius + board padding
+  const ax = RINK.w / 2 - bd;           // ellipse x semi-axis
+  const ay = RINK.h / 2 - bd;           // ellipse y semi-axis
+  const dx = x - RINK.cx;
+  const dy = y - RINK.cy;
+  const e  = (dx / ax) * (dx / ax) + (dy / ay) * (dy / ay);
+  if (e > 1) {
+    const s = 1 / Math.sqrt(e);
+    x = RINK.cx + dx * s;
+    y = RINK.cy + dy * s;
+  }
+  return [x, y];
+}
+
+// Goalie x-range: keeps them within the crease area
+function clampGoalie(p) {
+  const creaseX = RINK.h * 0.13 + 6;   // crease depth + slack
+  if (p.team === 0) p.x = Math.min(GL1 + creaseX, Math.max(RINK.x + 10, p.x));
+  else              p.x = Math.max(GL2 - creaseX, Math.min(RINK.x + RINK.w - 10, p.x));
+}
+
+function movePlayer(p, upKey, downKey, leftKey, rightKey) {
+  const maxSpd = statMax(p.rIdx, p.team);
+  const accel  = ACCEL * (maxSpd / MAX_SPD);   // faster players accelerate harder
+
+  let ax = 0, ay = 0;
+  if (keys[leftKey])  ax -= accel;
+  if (keys[rightKey]) ax += accel;
+  if (keys[upKey])    ay -= accel;
+  if (keys[downKey])  ay += accel;
+
+  // Diagonal normalisation — prevent 41% speed bonus
+  if (ax !== 0 && ay !== 0) { ax *= 0.7071; ay *= 0.7071; }
+
+  // Friction first, then add acceleration (natural ice feel)
+  p.vx = p.vx * FRICTION + ax;
+  p.vy = p.vy * FRICTION + ay;
+
+  // Speed cap
+  const spd = Math.hypot(p.vx, p.vy);
+  if (spd > maxSpd) { p.vx = p.vx / spd * maxSpd; p.vy = p.vy / spd * maxSpd; }
+
+  // Face direction of travel
+  if (spd > 0.25) p.dir = Math.atan2(p.vy, p.vx);
+
+  p.x += p.vx;
+  p.y += p.vy;
+
+  if (p.isGoalie) clampGoalie(p);
+  [p.x, p.y] = clampToRink(p.x, p.y);
+}
+
+function updatePlayers() {
+  if (game.state !== 'playing') return;
+
+  players.forEach(p => {
+    if (!p.controlled) {
+      // Non-controlled: coast to a stop
+      p.vx *= FRICTION;
+      p.vy *= FRICTION;
+      p.x  += p.vx;
+      p.y  += p.vy;
+      [p.x, p.y] = clampToRink(p.x, p.y);
+      return;
+    }
+    if (p.team === 0) {
+      movePlayer(p, 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight');
+    } else {
+      movePlayer(p, 'KeyW', 'KeyS', 'KeyA', 'KeyD');
+    }
   });
 }
 </script>
