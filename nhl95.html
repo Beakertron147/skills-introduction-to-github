@@ -305,6 +305,7 @@ function render(t) {
   } else {
     tickClock(t);
     drawRink();
+    drawAllPlayers();
     drawScoreboard();
   }
 
@@ -705,6 +706,130 @@ function drawScoreboard() {
   ctx.textAlign    = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(fmtClock(_clock), W / 2 + 50, SB_H / 2 + 1);
+}
+</script>
+
+<script>
+// ─── Chunk 6: Player sprites ──────────────────────────────────────────────────
+// players[] holds every on-ice skater/goalie for both teams.
+// dir = angle in radians; 0 = facing right, Math.PI = facing left.
+
+const players = [];
+
+function initPlayers() {
+  players.length = 0;
+  if (game.homeTeam === null || game.awayTeam === null) return;
+
+  function lineup(roster) {
+    const G  = roster.find(p => p.pos === 'G');
+    const Ds = roster.filter(p => p.pos === 'D').slice(0, 2);
+    const Fs = roster.filter(p => ['C','LW','RW'].includes(p.pos)).slice(0, 3);
+    return [G, ...Ds, ...Fs].filter(Boolean);
+  }
+
+  // Faceoff positions ─ home on left (dir=0), away on right (dir=π)
+  const hPos = [
+    { x: GL1 - 8,         y: RINK.cy      },   // goalie
+    { x: BL1 - 34,        y: RINK.cy - 62 },   // LD
+    { x: BL1 - 34,        y: RINK.cy + 62 },   // RD
+    { x: RINK.cx - 46,    y: RINK.cy - 52 },   // LW
+    { x: RINK.cx - 14,    y: RINK.cy      },   // C  ← P1 controls
+    { x: RINK.cx - 46,    y: RINK.cy + 52 },   // RW
+  ];
+  const aPos = [
+    { x: GL2 + 8,         y: RINK.cy      },
+    { x: BL2 + 34,        y: RINK.cy - 62 },
+    { x: BL2 + 34,        y: RINK.cy + 62 },
+    { x: RINK.cx + 46,    y: RINK.cy - 52 },
+    { x: RINK.cx + 14,    y: RINK.cy      },   // C  ← P2 controls
+    { x: RINK.cx + 46,    y: RINK.cy + 52 },
+  ];
+
+  const hLine = lineup(TEAMS[game.homeTeam].roster);
+  const aLine = lineup(TEAMS[game.awayTeam].roster);
+
+  hLine.forEach((r, i) => {
+    if (!hPos[i]) return;
+    players.push({ ...hPos[i], vx:0, vy:0, dir:0,         team:0,
+                   isGoalie: r.pos==='G', controlled: i===4,
+                   rIdx: TEAMS[game.homeTeam].roster.indexOf(r) });
+  });
+  aLine.forEach((r, i) => {
+    if (!aPos[i]) return;
+    players.push({ ...aPos[i], vx:0, vy:0, dir:Math.PI,   team:1,
+                   isGoalie: r.pos==='G', controlled: i===4,
+                   rIdx: TEAMS[game.awayTeam].roster.indexOf(r) });
+  });
+}
+
+// ── Draw a single sprite (local space: facing right = dir 0)
+function drawSprite(x, y, dir, isGoalie, controlled, team) {
+  ctx.save();
+  ctx.translate(Math.round(x), Math.round(y));
+  ctx.rotate(dir);
+
+  // controlled-player dashed ring
+  if (controlled) {
+    ctx.strokeStyle = 'rgba(255,255,255,0.92)';
+    ctx.lineWidth   = 2;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    ctx.arc(0, 0, 14, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // goalie blocker / pads (wide rectangles either side)
+  if (isGoalie) {
+    ctx.fillStyle = team.secondary === team.primary
+      ? 'rgba(255,255,255,0.6)' : team.secondary;
+    ctx.fillRect(-12, -3, 4, 6);
+    ctx.fillRect(8,   -3, 4, 6);
+  }
+
+  // body circle
+  const r = isGoalie ? 9 : 8;
+  ctx.fillStyle   = team.primary;
+  ctx.beginPath();
+  ctx.arc(0, 0, r, 0, Math.PI * 2);
+  ctx.fill();
+  // jersey outline in secondary colour
+  ctx.strokeStyle = team.secondary === team.primary
+    ? 'rgba(255,255,255,0.5)' : team.secondary;
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  // head (helmet = primary, face = skin tone below centre)
+  ctx.fillStyle = team.primary;
+  ctx.beginPath();
+  ctx.arc(r + 2, 0, 4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#DCA870';
+  ctx.beginPath();
+  ctx.arc(r + 2, 1, 2.5, 0, Math.PI);   // lower-face semicircle
+  ctx.fill();
+
+  // stick (skaters only – extends right-forward in local space)
+  if (!isGoalie) {
+    ctx.strokeStyle = '#A07038';
+    ctx.lineWidth   = 2;
+    ctx.lineCap     = 'round';
+    ctx.beginPath();
+    ctx.moveTo(2,  r);       // grip on hip
+    ctx.lineTo(10, r + 8);   // shaft
+    ctx.lineTo(18, r + 3);   // blade
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+function drawAllPlayers() {
+  if (players.length === 0 && game.homeTeam !== null) initPlayers();
+  players.forEach(p => {
+    const team = p.team === 0 ? TEAMS[game.homeTeam] : TEAMS[game.awayTeam];
+    drawSprite(p.x, p.y, p.dir, p.isGoalie, p.controlled, team);
+  });
 }
 </script>
 </body>
