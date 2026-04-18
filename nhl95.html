@@ -307,9 +307,11 @@ function render(t) {
     updatePlayers();
     resolveCollisions();
     updatePuck();
+    updateShooting();
     drawRink();
     drawAllPlayers();
     drawPuck();
+    drawShootingEffects();
     drawScoreboard();
     drawFaceoffOverlay();
   }
@@ -1161,6 +1163,106 @@ function drawFaceoffOverlay() {
   ctx.font      = '9px "Press Start 2P"';
   ctx.fillText('PERIOD  ' + game.period + '  OF  3', W / 2, H / 2 + 36);
 }
+</script>
+
+<script>
+// ─── Chunk 10: Shooting ───────────────────────────────────────────────────────
+// Wrist shot: tap shoot key  (held < 15 frames) → quick, 62 % base speed.
+// Slap  shot: hold then release → charge bar appears, full power at 50 frames.
+// Shot speed: 10–18 px/frame scaled by sht stat + charge level.
+// P1 = SPACE   P2 = ENTER
+
+const charge     = [0, 0];     // charge frames per team
+const MAX_CHARGE = 50;
+
+// ── Increment charge while shoot key is held by the puck carrier ─────────────
+function updateShooting() {
+  if (game.state !== 'playing') return;
+
+  [0, 1].forEach(team => {
+    const key    = team === 0 ? 'Space' : 'Enter';
+    const carrier = puck.carrier;
+    const ctrl    = players.find(p => p.team === team && p.controlled);
+    if (keys[key] && ctrl && carrier === ctrl) {
+      charge[team] = Math.min(charge[team] + 1, MAX_CHARGE);
+    } else if (!keys[key]) {
+      charge[team] = 0;   // key released — reset (shot was fired via onKeyUp)
+    }
+  });
+}
+
+// ── Fire the shot on key release ─────────────────────────────────────────────
+function tryShoot(teamIdx) {
+  const frames = charge[teamIdx];
+  charge[teamIdx] = 0;
+
+  if (game.state !== 'playing') return;
+  const ctrl = players.find(p => p.team === teamIdx && p.controlled);
+  if (!ctrl || puck.carrier !== ctrl) return;   // must be holding puck
+
+  const roster = teamIdx === 0 ? TEAMS[game.homeTeam].roster
+                               : TEAMS[game.awayTeam].roster;
+  const sht    = (roster[ctrl.rIdx] || { sht: 80 }).sht;
+
+  // Base speed: 10 px/frame (sht 0) → 18 px/frame (sht 98)
+  const baseSpd = 10 + sht / 98 * 8;
+  const isSlap  = frames >= 15;
+  const c       = Math.min(frames / MAX_CHARGE, 1);
+
+  // Wrist: 62 % base.  Slap: 85 %–170 % base, scaling with charge.
+  const shotSpd = isSlap ? baseSpd * (0.85 + c * 0.85)
+                         : baseSpd * 0.62;
+
+  puck.vx          = Math.cos(ctrl.dir) * shotSpd;
+  puck.vy          = Math.sin(ctrl.dir) * shotSpd;
+  puck.carrier     = null;
+  puck.immune      = ctrl;
+  puck.immuneTimer = 28;   // ~0.5 s at 60 fps
+}
+
+// ── Charge bar drawn above the carrier ───────────────────────────────────────
+function drawShootingEffects() {
+  if (game.state !== 'playing') return;
+
+  [0, 1].forEach(team => {
+    const c = charge[team];
+    if (c < 4) return;
+
+    const ctrl = players.find(p => p.team === team && p.controlled
+                                && p === puck.carrier);
+    if (!ctrl) return;
+
+    const pct  = Math.min(c / MAX_CHARGE, 1);
+    const barW = 26, barH = 4;
+    const bx   = ctrl.x - barW / 2;
+    const by   = ctrl.y - 26;
+
+    // Background
+    ctx.fillStyle = '#111';
+    ctx.fillRect(bx - 1, by - 1, barW + 2, barH + 2);
+
+    // Fill: green → yellow → red
+    ctx.fillStyle = `hsl(${Math.round(120 - pct * 120)},100%,50%)`;
+    ctx.fillRect(bx, by, barW * pct, barH);
+
+    // "SHOOT!" flash when fully charged
+    if (pct >= 0.98) {
+      ctx.fillStyle    = '#FFFFFF';
+      ctx.font         = '5px "Press Start 2P"';
+      ctx.textAlign    = 'center';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText('SHOOT!', ctrl.x, by - 1);
+    }
+  });
+}
+
+// ── Patch key handlers to fire shot on release ────────────────────────────────
+const _prevKeyUp = onKeyUp;
+onKeyUp = function patchedKeyUp(code) {
+  _prevKeyUp(code);
+  if (code === 'Space') tryShoot(0);
+  if (code === 'Enter') tryShoot(1);
+};
 </script>
 </body>
 </html>
