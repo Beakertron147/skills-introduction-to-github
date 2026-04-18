@@ -1418,9 +1418,7 @@ function updateGoalieAI() {
     g.dir = Math.atan2(puck.y - g.y, puck.x - g.x);
 
     clampGoalie(g);
-    const cl = clampToRink(g.x, g.y);
-    g.x = cl.x;
-    g.y = cl.y;
+    [g.x, g.y] = clampToRink(g.x, g.y);
     g.vx = 0;
     g.vy = 0;
   });
