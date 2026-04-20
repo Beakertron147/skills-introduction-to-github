@@ -8,7 +8,6 @@ function updateGoalOverlay() {
     _goalTimer = 0;
     initPlayers();
     initPuck();
-    _clock = game.periodTime;   // reset clock for next faceoff
     game.state = 'faceoff';
   }
 }
