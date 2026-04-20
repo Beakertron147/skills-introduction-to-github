@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Retro Ice Hockey</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #0a0a1a;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      font-family: 'Courier New', monospace;
+      color: #fff;
+      user-select: none;
+    }
+
+    h1 {
+      font-size: 2rem;
+      letter-spacing: 6px;
+      text-transform: uppercase;
+      color: #00e5ff;
+      text-shadow: 0 0 12px #00e5ff, 0 0 30px #00e5ff88;
+      margin-bottom: 8px;
+    }
+
+    #scoreboard {
+      display: flex;
+      gap: 40px;
+      font-size: 2.4rem;
+      font-weight: bold;
+      margin-bottom: 12px;
+      letter-spacing: 4px;
+      text-shadow: 0 0 8px #fff5;
+    }
+
+    .team-score { display: flex; flex-direction: column; align-items: center; }
+    .team-label { font-size: 0.75rem; letter-spacing: 3px; color: #aaa; }
+    .score-sep { color: #555; }
+
+    #period-display {
+      font-size: 0.8rem;
+      letter-spacing: 3px;
+      color: #ffcc00;
+      text-shadow: 0 0 6px #ffcc0088;
+      margin-bottom: 10px;
+    }
+
+    canvas {
+      border: 3px solid #00e5ff;
+      box-shadow: 0 0 20px #00e5ff55, inset 0 0 40px #00115522;
+      display: block;
+    }
+
+    #controls {
+      margin-top: 14px;
+      font-size: 0.72rem;
+      color: #667;
+      letter-spacing: 1px;
+      text-align: center;
+      line-height: 1.8;
+    }
+
+    #message {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 2rem;
+      letter-spacing: 4px;
+      text-align: center;
+      pointer-events: none;
+      text-shadow: 0 0 20px currentColor;
+    }
+
+    #wrapper { position: relative; }
+  </style>
+</head>
+<body>
+
+<h1>&#9971; Ice Hockey</h1>
+
+<div id="scoreboard">
+  <div class="team-score">
+    <span class="team-label">P1</span>
+    <span id="score-left">0</span>
+  </div>
+  <div class="score-sep">:</div>
+  <div class="team-score">
+    <span class="team-label">P2</span>
+    <span id="score-right">0</span>
+  </div>
+</div>
+
+<div id="period-display">PERIOD 1 &nbsp;|&nbsp; <span id="timer">3:00</span></div>
+
+<div id="wrapper">
+  <canvas id="rink" width="700" height="420"></canvas>
+  <div id="message"></div>
+</div>
+
+<div id="controls">
+  PLAYER 1: W A S D &nbsp;|&nbsp; PLAYER 2: ARROW KEYS &nbsp;|&nbsp; PRESS ENTER TO START / RESTART
+</div>
+
+<script>
+// ─── Constants ────────────────────────────────────────────────────────────────
+const W = 700, H = 420;
+const RINK_PAD = 30;         // side/top/bottom padding inside canvas
+const GOAL_W   = 12;
+const GOAL_H   = 90;
+const PLAYER_R = 16;
+const PUCK_R   = 8;
+const PERIODS  = 3;
+const PERIOD_SECS = 180;     // 3 minutes each
+const WIN_SCORE = 5;         // first to 5 wins the match
+
+// ─── State ────────────────────────────────────────────────────────────────────
+let gameState = 'start'; // start | playing | paused | goal | end
+let scores = [0, 0];
+let period = 1;
+let periodTime = PERIOD_SECS;
+let timerInterval = null;
+
+const keys = {};
+
+// ─── Canvas ───────────────────────────────────────────────────────────────────
+const canvas = document.getElementById('rink');
+const ctx    = canvas.getContext('2d');
+
+// ─── Game Objects ─────────────────────────────────────────────────────────────
+const rink = {
+  x: RINK_PAD, y: RINK_PAD,
+  w: W - RINK_PAD * 2,
+  h: H - RINK_PAD * 2,
+};
+
+function makePlayer(x, y, color, keys) {
+  return { x, y, vx: 0, vy: 0, r: PLAYER_R, color, keys, hasPuck: false };
+}
+
+let players, puck;
+
+function resetPositions() {
+  players = [
+    makePlayer(rink.x + 80, rink.y + rink.h / 2, '#ff4444', { up:'w', down:'s', left:'a', right:'d' }),
+    makePlayer(rink.x + rink.w - 80, rink.y + rink.h / 2, '#4488ff', { up:'ArrowUp', down:'ArrowDown', left:'ArrowLeft', right:'ArrowRight' }),
+  ];
+  puck = { x: W / 2, y: H / 2, vx: 0, vy: 0, r: PUCK_R, holder: null };
+}
+
+// Goals: [left-goal, right-goal]
+const goals = [
+  { x: rink.x - GOAL_W, y: H/2 - GOAL_H/2, w: GOAL_W, h: GOAL_H, team: 1 }, // scored by P2
+  { x: rink.x + rink.w, y: H/2 - GOAL_H/2, w: GOAL_W, h: GOAL_H, team: 0 }, // scored by P1
+];
+
+// ─── Physics constants ────────────────────────────────────────────────────────
+const PLAYER_SPEED    = 4.2;
+const PLAYER_FRICTION = 0.82;
+const PUCK_FRICTION   = 0.985;
+const PUCK_MAX_SPEED  = 14;
+const SHOOT_POWER     = 10;
+const PASS_POWER      = 7;
+const PICKUP_DIST     = PLAYER_R + PUCK_R + 2;
+const CARRY_DIST      = PLAYER_R + PUCK_R;
+
+// ─── Timer ────────────────────────────────────────────────────────────────────
+function startTimer() {
+  clearInterval(timerInterval);
+  timerInterval = setInterval(() => {
+    if (gameState !== 'playing') return;
+    periodTime--;
+    updateTimerDisplay();
+    if (periodTime <= 0) endPeriod();
+  }, 1000);
+}
+
+function updateTimerDisplay() {
+  const m = Math.floor(periodTime / 60);
+  const s = periodTime % 60;
+  document.getElementById('timer').textContent = `${m}:${s.toString().padStart(2,'0')}`;
+  document.getElementById('period-display').innerHTML =
+    `PERIOD ${period} &nbsp;|&nbsp; <span id="timer">${m}:${s.toString().padStart(2,'0')}</span>`;
+}
+
+function endPeriod() {
+  if (period < PERIODS) {
+    period++;
+    periodTime = PERIOD_SECS;
+    updateTimerDisplay();
+    resetPositions();
+    showMessage(`PERIOD ${period}`, 2000);
+  } else {
+    endGame();
+  }
+}
+
+function endGame() {
+  clearInterval(timerInterval);
+  gameState = 'end';
+  const winner = scores[0] > scores[1] ? 'PLAYER 1' : scores[1] > scores[0] ? 'PLAYER 2' : null;
+  const msg = winner ? `${winner} WINS!` : "IT'S A TIE!";
+  showMessage(msg + '\n\nENTER to play again', 0);
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+function showMessage(text, duration) {
+  const el = document.getElementById('message');
+  el.style.color = '#ffcc00';
+  el.style.whiteSpace = 'pre';
+  el.textContent = text;
+  if (duration > 0) setTimeout(() => { el.textContent = ''; }, duration);
+}
+
+// ─── Update ───────────────────────────────────────────────────────────────────
+function update() {
+  if (gameState !== 'playing') return;
+
+  // Move players
+  players.forEach(p => {
+    let ax = 0, ay = 0;
+    if (keys[p.keys.up])    ay -= 1;
+    if (keys[p.keys.down])  ay += 1;
+    if (keys[p.keys.left])  ax -= 1;
+    if (keys[p.keys.right]) ax += 1;
+
+    if (ax !== 0 && ay !== 0) { ax *= 0.707; ay *= 0.707; }
+
+    p.vx = p.vx * PLAYER_FRICTION + ax * PLAYER_SPEED * (1 - PLAYER_FRICTION);
+    p.vy = p.vy * PLAYER_FRICTION + ay * PLAYER_SPEED * (1 - PLAYER_FRICTION);
+
+    p.x = clamp(p.x + p.vx, rink.x + p.r, rink.x + rink.w - p.r);
+    p.y = clamp(p.y + p.vy, rink.y + p.r, rink.y + rink.h - p.r);
+  });
+
+  // Player-player collision
+  const d = dist(players[0], players[1]);
+  if (d < PLAYER_R * 2) {
+    const angle = Math.atan2(players[1].y - players[0].y, players[1].x - players[0].x);
+    const overlap = PLAYER_R * 2 - d;
+    const push = overlap / 2 + 0.5;
+    players[0].x -= Math.cos(angle) * push;
+    players[0].y -= Math.sin(angle) * push;
+    players[1].x += Math.cos(angle) * push;
+    players[1].y += Math.sin(angle) * push;
+
+    // Transfer momentum
+    const dvx = players[0].vx - players[1].vx;
+    const dvy = players[0].vy - players[1].vy;
+    const dot = dvx * Math.cos(angle) + dvy * Math.sin(angle);
+    if (dot > 0) {
+      players[0].vx -= dot * Math.cos(angle) * 0.6;
+      players[0].vy -= dot * Math.sin(angle) * 0.6;
+      players[1].vx += dot * Math.cos(angle) * 0.6;
+      players[1].vy += dot * Math.sin(angle) * 0.6;
+    }
+
+    // Dislodge puck on body check
+    if (puck.holder !== null) {
+      const holderIdx = puck.holder;
+      const checkerIdx = 1 - holderIdx;
+      const relSpeed = Math.hypot(players[checkerIdx].vx, players[checkerIdx].vy);
+      if (relSpeed > 2.5) {
+        puck.holder = null;
+        puck.vx = players[holderIdx].vx * 0.5 + players[checkerIdx].vx * 0.5;
+        puck.vy = players[holderIdx].vy * 0.5 + players[checkerIdx].vy * 0.5;
+      }
+    }
+  }
+
+  // Puck logic
+  if (puck.holder !== null) {
+    // Puck sticks to holder
+    const p = players[puck.holder];
+    const angle = Math.atan2(p.vy || 0.001, p.vx || 0.001);
+    puck.x = p.x + Math.cos(angle) * CARRY_DIST;
+    puck.y = p.y + Math.sin(angle) * CARRY_DIST;
+    puck.x = clamp(puck.x, rink.x + puck.r, rink.x + rink.w - puck.r);
+    puck.y = clamp(puck.y, rink.y + puck.r, rink.y + rink.h - puck.r);
+    puck.vx = p.vx;
+    puck.vy = p.vy;
+  } else {
+    // Free puck: friction + wall bounces
+    puck.vx *= PUCK_FRICTION;
+    puck.vy *= PUCK_FRICTION;
+
+    puck.x += puck.vx;
+    puck.y += puck.vy;
+
+    // Wall bounces (top/bottom)
+    if (puck.y - puck.r < rink.y) { puck.y = rink.y + puck.r; puck.vy *= -0.7; }
+    if (puck.y + puck.r > rink.y + rink.h) { puck.y = rink.y + rink.h - puck.r; puck.vy *= -0.7; }
+
+    // Left wall / goal
+    if (puck.x - puck.r < rink.x) {
+      const inGoalY = puck.y > goals[0].y && puck.y < goals[0].y + goals[0].h;
+      if (inGoalY) {
+        scoreGoal(1); return;
+      }
+      puck.x = rink.x + puck.r; puck.vx *= -0.7;
+    }
+    // Right wall / goal
+    if (puck.x + puck.r > rink.x + rink.w) {
+      const inGoalY = puck.y > goals[1].y && puck.y < goals[1].y + goals[1].h;
+      if (inGoalY) {
+        scoreGoal(0); return;
+      }
+      puck.x = rink.x + rink.w - puck.r; puck.vx *= -0.7;
+    }
+
+    // Speed cap
+    const speed = Math.hypot(puck.vx, puck.vy);
+    if (speed > PUCK_MAX_SPEED) { puck.vx *= PUCK_MAX_SPEED/speed; puck.vy *= PUCK_MAX_SPEED/speed; }
+
+    // Pickup
+    players.forEach((p, i) => {
+      if (dist(p, puck) < PICKUP_DIST) {
+        puck.holder = i;
+        puck.vx = 0; puck.vy = 0;
+      }
+    });
+  }
+}
+
+// ─── Shoot ────────────────────────────────────────────────────────────────────
+function shoot(playerIdx) {
+  if (puck.holder !== playerIdx) return;
+  const p = players[playerIdx];
+  const target = players[1 - playerIdx];
+  // Aim toward opponent goal
+  const goalX = playerIdx === 0 ? goals[1].x + GOAL_W / 2 : goals[0].x + GOAL_W / 2;
+  const goalY = H / 2;
+  const angle = Math.atan2(goalY - p.y, goalX - p.x);
+  puck.holder = null;
+  puck.vx = Math.cos(angle) * SHOOT_POWER;
+  puck.vy = Math.sin(angle) * SHOOT_POWER;
+}
+
+// ─── Score ────────────────────────────────────────────────────────────────────
+function scoreGoal(team) {
+  scores[team]++;
+  document.getElementById('score-left').textContent  = scores[0];
+  document.getElementById('score-right').textContent = scores[1];
+  gameState = 'goal';
+  showMessage(`GOAL! PLAYER ${team + 1} SCORES!`, 2000);
+
+  if (scores[team] >= WIN_SCORE) {
+    setTimeout(endGame, 2200);
+  } else {
+    setTimeout(() => {
+      resetPositions();
+      gameState = 'playing';
+    }, 2200);
+  }
+}
+
+// ─── Draw ─────────────────────────────────────────────────────────────────────
+function drawRink() {
+  // Background ice
+  const iceGrad = ctx.createLinearGradient(rink.x, rink.y, rink.x, rink.y + rink.h);
+  iceGrad.addColorStop(0, '#d0eeff');
+  iceGrad.addColorStop(1, '#b8dcf5');
+  ctx.fillStyle = iceGrad;
+  ctx.beginPath();
+  ctx.roundRect(rink.x, rink.y, rink.w, rink.h, 22);
+  ctx.fill();
+
+  // Rink border
+  ctx.strokeStyle = '#5599cc';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.roundRect(rink.x, rink.y, rink.w, rink.h, 22);
+  ctx.stroke();
+
+  // Center line
+  ctx.strokeStyle = '#cc3333';
+  ctx.lineWidth = 3;
+  ctx.setLineDash([10, 6]);
+  ctx.beginPath();
+  ctx.moveTo(W/2, rink.y + 4);
+  ctx.lineTo(W/2, rink.y + rink.h - 4);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Center circle
+  ctx.strokeStyle = '#cc3333';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(W/2, H/2, 40, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Blue lines
+  [rink.x + rink.w * 0.28, rink.x + rink.w * 0.72].forEach(bx => {
+    ctx.strokeStyle = '#3355cc';
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(bx, rink.y + 4);
+    ctx.lineTo(bx, rink.y + rink.h - 4);
+    ctx.stroke();
+  });
+
+  // Goal creases
+  goals.forEach((g, i) => {
+    const cx = i === 0 ? rink.x + 22 : rink.x + rink.w - 22;
+    ctx.fillStyle = '#99ccee55';
+    ctx.strokeStyle = '#3399cc';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(cx, H/2, 28, -Math.PI/2, Math.PI/2, i === 0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  });
+
+  // Face-off dots
+  const dotColor = '#cc4444';
+  const dots = [
+    [rink.x + rink.w * 0.22, rink.y + rink.h * 0.28],
+    [rink.x + rink.w * 0.22, rink.y + rink.h * 0.72],
+    [rink.x + rink.w * 0.78, rink.y + rink.h * 0.28],
+    [rink.x + rink.w * 0.78, rink.y + rink.h * 0.72],
+    [W/2, H/2],
+  ];
+  dots.forEach(([dx, dy]) => {
+    ctx.fillStyle = dotColor;
+    ctx.beginPath();
+    ctx.arc(dx, dy, 5, 0, Math.PI * 2);
+    ctx.fill();
+  });
+}
+
+function drawGoals() {
+  goals.forEach((g, i) => {
+    ctx.fillStyle = '#ccc';
+    ctx.strokeStyle = '#888';
+    ctx.lineWidth = 2;
+    ctx.fillRect(g.x, g.y, g.w, g.h);
+    ctx.strokeRect(g.x, g.y, g.w, g.h);
+
+    // Net lines
+    ctx.strokeStyle = '#aaa';
+    ctx.lineWidth = 1;
+    for (let ny = g.y + 12; ny < g.y + g.h; ny += 12) {
+      ctx.beginPath();
+      ctx.moveTo(g.x, ny);
+      ctx.lineTo(g.x + g.w, ny);
+      ctx.stroke();
+    }
+    ctx.beginPath();
+    ctx.moveTo(g.x + g.w / 2, g.y);
+    ctx.lineTo(g.x + g.w / 2, g.y + g.h);
+    ctx.stroke();
+  });
+}
+
+function drawPlayer(p, idx) {
+  // Shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.15)';
+  ctx.beginPath();
+  ctx.ellipse(p.x + 3, p.y + 4, p.r * 0.9, p.r * 0.5, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Body
+  const grad = ctx.createRadialGradient(p.x - 4, p.y - 4, 2, p.x, p.y, p.r);
+  grad.addColorStop(0, lighten(p.color, 60));
+  grad.addColorStop(1, p.color);
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Jersey number
+  ctx.fillStyle = '#fff';
+  ctx.font = `bold ${p.r}px Courier New`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(idx + 1, p.x, p.y + 1);
+
+  // Stick
+  const moveAngle = Math.atan2(p.vy || (idx === 0 ? 0 : 0), p.vx || (idx === 0 ? 1 : -1));
+  const stickAngle = puck.holder === idx
+    ? Math.atan2(puck.y - p.y, puck.x - p.x)
+    : moveAngle;
+  const sx = p.x + Math.cos(stickAngle) * (p.r + 4);
+  const sy = p.y + Math.sin(stickAngle) * (p.r + 4);
+  ctx.strokeStyle = '#553300';
+  ctx.lineWidth = 3;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(sx, sy);
+  ctx.lineTo(sx + Math.cos(stickAngle) * 18, sy + Math.sin(stickAngle) * 18);
+  ctx.stroke();
+}
+
+function drawPuck() {
+  ctx.fillStyle = '#111';
+  ctx.beginPath();
+  ctx.ellipse(puck.x, puck.y, puck.r, puck.r * 0.6, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#444';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+}
+
+function drawBackground() {
+  ctx.fillStyle = '#08081a';
+  ctx.fillRect(0, 0, W, H);
+}
+
+function lighten(hex, amount) {
+  const num = parseInt(hex.replace('#',''), 16);
+  const r = Math.min(255, (num >> 16) + amount);
+  const g = Math.min(255, ((num >> 8) & 0xff) + amount);
+  const b = Math.min(255, (num & 0xff) + amount);
+  return `rgb(${r},${g},${b})`;
+}
+
+function drawStartScreen() {
+  ctx.fillStyle = 'rgba(0,0,30,0.7)';
+  ctx.fillRect(rink.x, rink.y, rink.w, rink.h);
+  ctx.fillStyle = '#00e5ff';
+  ctx.font = 'bold 28px Courier New';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('PRESS ENTER TO START', W/2, H/2);
+}
+
+// ─── Main loop ────────────────────────────────────────────────────────────────
+function render() {
+  drawBackground();
+  drawRink();
+  drawGoals();
+  players.forEach((p, i) => drawPlayer(p, i));
+  drawPuck();
+
+  if (gameState === 'start') drawStartScreen();
+
+  requestAnimationFrame(render);
+}
+
+// ─── Input ────────────────────────────────────────────────────────────────────
+document.addEventListener('keydown', e => {
+  keys[e.key] = true;
+
+  if (e.key === 'Enter') {
+    if (gameState === 'start' || gameState === 'end') {
+      scores = [0, 0];
+      period = 1;
+      periodTime = PERIOD_SECS;
+      document.getElementById('score-left').textContent  = 0;
+      document.getElementById('score-right').textContent = 0;
+      updateTimerDisplay();
+      resetPositions();
+      gameState = 'playing';
+      document.getElementById('message').textContent = '';
+      startTimer();
+    }
+  }
+
+  // Shoot: space for P1, Enter/Shift for P2
+  if (e.key === ' ' && puck.holder === 0) shoot(0);
+  if (e.key === 'Shift' && puck.holder === 1) shoot(1);
+
+  e.preventDefault();
+});
+
+document.addEventListener('keyup', e => { keys[e.key] = false; });
+
+// ─── Game tick ────────────────────────────────────────────────────────────────
+setInterval(update, 1000 / 60);
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+resetPositions();
+render();
+</script>
+</body>
+</html>

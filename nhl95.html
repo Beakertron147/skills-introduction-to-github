@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NHL '95</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #000; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; font-family: 'Press Start 2P', monospace; overflow: hidden; }
+    canvas { display: block; image-rendering: pixelated; image-rendering: crisp-edges; }
+    #controls { margin-top: 10px; color: #444; font-size: 7px; letter-spacing: 1px; text-align: center; line-height: 2; }
+  </style>
+</head>
+<body>
+<canvas id="c" width="800" height="520"></canvas>
+<div id="controls">
+  P1: ARROWS · SPACE=shoot/charge · Q=pass · TAB=switch
+  &nbsp;|&nbsp;
+  P2: WASD · ENTER=shoot/charge · E=pass · SHIFT=switch
+</div>
+<script src="teams.js"></script>
+<script src="nhl95-core.js"></script>
+<script src="nhl95-rink.js"></script>
+<script src="nhl95-scoreboard.js"></script>
+<script src="nhl95-players.js"></script>
+<script src="nhl95-puck.js"></script>
+<script src="nhl95-gameplay.js"></script>
+<script src="nhl95-goals.js"></script>
+<script src="nhl95-goal-overlay.js"></script>
+<script src="nhl95-period-end.js"></script>
+<script src="nhl95-switch.js"></script>
+<script src="nhl95-cpu-chase.js"></script>
+<script src="nhl95-cpu-ai.js"></script>
+<script src="nhl95-sfx.js"></script>
+</body>
+</html>
